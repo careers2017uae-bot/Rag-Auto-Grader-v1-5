@@ -22,6 +22,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import requests
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 # Optional imports
 try:
@@ -207,11 +208,53 @@ def parse_teacher_rubric(text: str) -> Optional[dict]:
     
     return {"criteria": criteria}
 
-def apply_rubric_json(rubric: dict, model_ans: str, student_ans: str) -> Dict[str, Any]:
+def convert_to_ielts_band(score_100: float) -> float:
+    """
+    Convert 0-100 score to IELTS band 0-9
+    Based on IELTS Writing Task 2 band descriptors approximation
+    """
+    if score_100 >= 95:
+        return 9.0
+    elif score_100 >= 88:
+        return 8.5
+    elif score_100 >= 80:
+        return 8.0
+    elif score_100 >= 75:
+        return 7.5
+    elif score_100 >= 70:
+        return 7.0
+    elif score_100 >= 65:
+        return 6.5
+    elif score_100 >= 60:
+        return 6.0
+    elif score_100 >= 55:
+        return 5.5
+    elif score_100 >= 50:
+        return 5.0
+    elif score_100 >= 45:
+        return 4.5
+    elif score_100 >= 40:
+        return 4.0
+    elif score_100 >= 35:
+        return 3.5
+    elif score_100 >= 30:
+        return 3.0
+    elif score_100 >= 25:
+        return 2.5
+    elif score_100 >= 20:
+        return 2.0
+    elif score_100 >= 15:
+        return 1.5
+    elif score_100 >= 10:
+        return 1.0
+    else:
+        return 0.5 if score_100 > 0 else 0.0
+
+def apply_rubric_json(rubric: dict, model_ans: str, student_ans: str, output_scale: str = "numeric_100") -> Dict[str, Any]:
     """Apply rubric-based grading with proper weight distribution."""
     criteria = rubric.get("criteria", [])
     if not criteria:
-        return heuristic_grade(model_ans, student_ans)
+        return heuristic_grade(model_ans, student_ans, output_scale)
     
     with st.status("📊 Applying rubric criteria...", state="running") as status:
         # Calculate similarity
@@ -261,14 +304,25 @@ def apply_rubric_json(rubric: dict, model_ans: str, student_ans: str) -> Dict[st
         # Ensure total_score doesn't exceed 100
         total_score = min(100.0, total_score)
         
+        # Convert to IELTS band if needed
+        if output_scale == "ielts_band_0-9":
+            ielts_band = convert_to_ielts_band(total_score)
+            final_display_score = ielts_band
+            scale_used = "ielts"
+        else:
+            final_display_score = total_score
+            scale_used = "numeric"
+        
         status.update(label="✅ Rubric applied successfully", state="complete")
     
     return {
-        "final_score": round(total_score, 2),
+        "final_score": round(final_display_score, 2),
         "breakdown": breakdown,
         "similarity": similarity_percent / 100.0,
         "grammar": grammar_result,
-        "grading_method": "rubric"
+        "grading_method": "rubric",
+        "scale_used": scale_used,
+        "original_100_score": round(total_score, 2) if output_scale == "ielts_band_0-9" else None
     }
 
 def export_results_to_excel(results: list) -> bytes:
@@ -281,9 +335,15 @@ def export_results_to_excel(results: list) -> bytes:
 
     for r in results:
         # -------- Summary Sheet --------
+        scale_info = ""
+        if r.get("details", {}).get("scale_used") == "ielts":
+            scale_info = f" (IELTS Band: {r.get('final_score')})"
+        
         summary_rows.append({
             "Student Name": r.get("name"),
             "Final Score": r.get("final_score"),
+            "Scale": r.get("details", {}).get("scale_used", "numeric_100"),
+            "Original 100-point Score": r.get("details", {}).get("original_100_score", r.get("final_score")),
             "Similarity (%)": round(r.get("details", {}).get("similarity", 0) * 100, 2),
             "Grammar Issues": r.get("details", {}).get("grammar", {}).get("issues_count"),
             "Grading Method": r.get("details", {}).get("grading_method"),
@@ -490,10 +550,10 @@ def grammar_check_with_jina(text: str) -> Dict[str, Any]:
             status.update(label="🔶 Error with Jina AI grammar check", state="error")
             return {"available": False, "issues_count": 0, "examples": []}
 
-def apply_rubric_json_secondary(rubric: dict, model_ans: str, student_ans: str) -> Dict[str, Any]:
+def apply_rubric_json_secondary(rubric: dict, model_ans: str, student_ans: str, output_scale: str = "numeric_100") -> Dict[str, Any]:
     criteria = rubric.get("criteria", [])
     if not criteria:
-        return heuristic_grade(model_ans, student_ans)
+        return heuristic_grade(model_ans, student_ans, output_scale)
 
     # Show grading progress
     with st.status("📊 Applying rubric criteria...", state="running") as status:
@@ -532,18 +592,28 @@ def apply_rubric_json_secondary(rubric: dict, model_ans: str, student_ans: str) 
                 "type": t
             })
         
+        # Convert to IELTS band if needed
+        if output_scale == "ielts_band_0-9":
+            ielts_band = convert_to_ielts_band(total_score)
+            final_display_score = ielts_band
+            scale_used = "ielts"
+        else:
+            final_display_score = total_score
+            scale_used = "numeric"
+        
         status.update(label="✅ Rubric applied successfully", state="complete")
 
-    final_score = round(total_score, 2)
     return {
-        "final_score": final_score, 
+        "final_score": round(final_display_score, 2), 
         "breakdown": breakdown, 
         "similarity": sim_norm, 
         "grammar": g,
-        "grading_method": "rubric"
+        "grading_method": "rubric",
+        "scale_used": scale_used,
+        "original_100_score": round(total_score, 2) if output_scale == "ielts_band_0-9" else None
     }
 
-def heuristic_grade(model_ans: str, student_ans: str) -> Dict[str, Any]:
+def heuristic_grade(model_ans: str, student_ans: str, output_scale: str = "numeric_100") -> Dict[str, Any]:
     with st.status("🎯 Computing similarity scores...", state="running") as status:
         vecs = embed_texts([model_ans, student_ans])
         sim = cosine_sim(vecs[0], vecs[1])
@@ -556,7 +626,17 @@ def heuristic_grade(model_ans: str, student_ans: str) -> Dict[str, Any]:
             issues = g["issues_count"]
             penalty = min(40.0, issues * 1.5)
             
-        final = round(max(0.0, base - penalty), 2)
+        total_score = max(0.0, base - penalty)
+        
+        # Convert to IELTS band if needed
+        if output_scale == "ielts_band_0-9":
+            ielts_band = convert_to_ielts_band(total_score)
+            final_display_score = ielts_band
+            scale_used = "ielts"
+        else:
+            final_display_score = total_score
+            scale_used = "numeric"
+            
         breakdown = [
             {"criterion": "Content Similarity", "weight": 0.8, "subscore": round(base,2), "type": "similarity"},
             {"criterion": "Grammar & Mechanics", "weight": 0.2, "subscore": round(max(0, 100 - penalty),2), "type": "grammar"}
@@ -564,12 +644,14 @@ def heuristic_grade(model_ans: str, student_ans: str) -> Dict[str, Any]:
         status.update(label="✅ Automatic grading completed", state="complete")
         
     return {
-        "final_score": final, 
+        "final_score": round(final_display_score, 2), 
         "breakdown": breakdown, 
         "similarity": sim_norm, 
         "grammar": g, 
         "penalty": penalty,
-        "grading_method": "heuristic"
+        "grading_method": "heuristic",
+        "scale_used": scale_used,
+        "original_100_score": round(total_score, 2) if output_scale == "ielts_band_0-9" else None
     }
 
 # ---------------------------
@@ -766,19 +848,41 @@ with tab2:
                     st.markdown(f"### 👨‍🎓 {r.get('name', 'Student')}")
                 with col2:
                     score = r.get('final_score', 0)
-                    score_color = "green" if score >= 80 else "orange" if score >= 60 else "red"
-                    st.markdown(f"<h2 style='color: {score_color}; text-align: center;'>{score}/100</h2>", unsafe_allow_html=True)
+                    
+                    # Adjust score display based on scale
+                    if r.get("details", {}).get("scale_used") == "ielts":
+                        score_text = f"{score}/9"
+                        # IELTS band color coding
+                        score_color = "green" if score >= 7 else "orange" if score >= 5 else "red"
+                    else:
+                        score_text = f"{score}/100"
+                        score_color = "green" if score >= 80 else "orange" if score >= 60 else "red"
+                    
+                    st.markdown(f"<h2 style='color: {score_color}; text-align: center;'>{score_text}</h2>", unsafe_allow_html=True)
                 
-                # Progress bar visualization
-                st.markdown('<div class="progress-bar"><div class="progress-fill" style="width: {}%;"></div></div>'.format(score), unsafe_allow_html=True)
+                # Progress bar visualization (adjust max value based on scale)
+                if r.get("details", {}).get("scale_used") == "ielts":
+                    progress_percent = (score / 9) * 100
+                else:
+                    progress_percent = score
+                
+                st.markdown('<div class="progress-bar"><div class="progress-fill" style="width: {}%;"></div></div>'.format(progress_percent), unsafe_allow_html=True)
                 
                 # Score interpretation
-                if score >= 80:
-                    st.markdown('<div class="success-box">🎉 Excellent work! Strong understanding demonstrated.</div>', unsafe_allow_html=True)
-                elif score >= 60:
-                    st.markdown('<div class="warning-box">📚 Good effort, with room for improvement in key areas.</div>', unsafe_allow_html=True)
+                if r.get("details", {}).get("scale_used") == "ielts":
+                    if score >= 7:
+                        st.markdown('<div class="success-box">🎉 Excellent IELTS performance! Band {score} indicates strong language proficiency.</div>', unsafe_allow_html=True)
+                    elif score >= 5:
+                        st.markdown('<div class="warning-box">📚 Good IELTS band {score}. Shows competence with some room for improvement.</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="warning-box">💡 IELTS band {score} indicates limited proficiency. Focus on core language skills.</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown('<div class="warning-box">💡 Needs significant improvement. Review fundamental concepts.</div>', unsafe_allow_html=True)
+                    if score >= 80:
+                        st.markdown('<div class="success-box">🎉 Excellent work! Strong understanding demonstrated.</div>', unsafe_allow_html=True)
+                    elif score >= 60:
+                        st.markdown('<div class="warning-box">📚 Good effort, with room for improvement in key areas.</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="warning-box">💡 Needs significant improvement. Review fundamental concepts.</div>', unsafe_allow_html=True)
                 
                 # Detailed feedback in expanders
                 col1, col2 = st.columns(2)
@@ -830,36 +934,236 @@ with tab3:
     if not st.session_state.results:
         st.info("No grading data available. Complete a grading session first.")
     else:
-        # Basic analytics
-        scores = [r.get('final_score', 0) for r in st.session_state.results if r.get('final_score') is not None]
+        # Get the current scale from sidebar
+        scale_type = "ielts" if output_scale == "ielts_band_0-9" else "numeric"
+        
+        # Prepare data for analytics
+        scores = []
+        original_scores = []
+        student_names = []
+        
+        for r in st.session_state.results:
+            if r.get('final_score') is not None:
+                scores.append(r.get('final_score'))
+                student_names.append(r.get('name', f"Student {len(scores)}"))
+                # Store original 100-point score for comparison if needed
+                original_scores.append(r.get("details", {}).get("original_100_score", r.get('final_score')))
         
         if scores:
+            # Enhanced Analytics Dashboard
+            st.markdown("### 📊 Performance Overview")
+            
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Average Score", f"{np.mean(scores):.1f}")
+                avg_score = np.mean(scores)
+                if scale_type == "ielts":
+                    st.metric("Average Band Score", f"{avg_score:.1f}", "Band")
+                else:
+                    st.metric("Average Score", f"{avg_score:.1f}")
+            
             with col2:
-                st.metric("Highest Score", f"{max(scores):.1f}")
+                high_score = max(scores)
+                if scale_type == "ielts":
+                    st.metric("Highest Band", f"{high_score:.1f}", "Band")
+                else:
+                    st.metric("Highest Score", f"{high_score:.1f}")
+            
             with col3:
-                st.metric("Lowest Score", f"{min(scores):.1f}")
+                low_score = min(scores)
+                if scale_type == "ielts":
+                    st.metric("Lowest Band", f"{low_score:.1f}", "Band")
+                else:
+                    st.metric("Lowest Score", f"{low_score:.1f}")
+            
             with col4:
                 st.metric("Students Graded", len(scores))
             
-            # Score distribution
-            st.markdown("#### Score Distribution")
-            hist_values = np.histogram(scores, bins=10, range=(0, 100))[0]
-            st.bar_chart(hist_values)
+            # Score Distribution with Enhanced Visualization
+            st.markdown("#### 📈 Score Distribution")
+            
+            # Create two columns for visualizations
+            viz_col1, viz_col2 = st.columns(2)
+            
+            with viz_col1:
+                # Bar chart with proper labels
+                if scale_type == "ielts":
+                    # For IELTS, use 0-9 scale with 0.5 increments
+                    bins = np.arange(0, 9.5, 0.5)
+                    x_label = "IELTS Band Score"
+                    title = "IELTS Band Distribution"
+                else:
+                    # For numeric, use 0-100 with 10-point increments
+                    bins = list(range(0, 101, 10))
+                    x_label = "Score (0-100)"
+                    title = "Score Distribution"
+                
+                # Create histogram
+                fig, ax = plt.subplots(figsize=(8, 4))
+                counts, bins, patches = ax.hist(scores, bins=bins, edgecolor='black', alpha=0.7)
+                
+                # Customize appearance
+                ax.set_xlabel(x_label, fontsize=10)
+                ax.set_ylabel('Number of Students', fontsize=10)
+                ax.set_title(title, fontsize=12, fontweight='bold')
+                
+                # Add count labels on bars
+                for count, patch in zip(counts, patches):
+                    if count > 0:
+                        ax.text(patch.get_x() + patch.get_width() / 2, count + 0.1,
+                               f'{int(count)}', ha='center', va='bottom', fontsize=9)
+                
+                # Add grid for better readability
+                ax.grid(axis='y', alpha=0.3)
+                ax.set_axisbelow(True)
+                
+                # Adjust layout
+                plt.tight_layout()
+                st.pyplot(fig)
+            
+            with viz_col2:
+                # Box plot for distribution overview
+                fig2, ax2 = plt.subplots(figsize=(8, 4))
+                
+                # Create box plot
+                bp = ax2.boxplot(scores, vert=False, patch_artist=True, 
+                                boxprops=dict(facecolor='lightblue'),
+                                medianprops=dict(color='red', linewidth=2))
+                
+                # Add individual data points with jitter
+                y = np.random.normal(1, 0.04, size=len(scores))
+                ax2.scatter(scores, y, alpha=0.6, s=50, edgecolors='black')
+                
+                # Customize appearance
+                if scale_type == "ielts":
+                    ax2.set_xlabel('IELTS Band Score (0-9)', fontsize=10)
+                    ax2.set_xlim(0, 9)
+                    ax2.set_xticks(np.arange(0, 10, 1))
+                else:
+                    ax2.set_xlabel('Score (0-100)', fontsize=10)
+                    ax2.set_xlim(0, 100)
+                    ax2.set_xticks(np.arange(0, 101, 10))
+                
+                ax2.set_yticks([])
+                ax2.set_title('Score Distribution with Outliers', fontsize=12, fontweight='bold')
+                ax2.grid(axis='x', alpha=0.3)
+                ax2.set_axisbelow(True)
+                
+                # Add statistics text
+                stats_text = f"""
+                Median: {np.median(scores):.1f}
+                IQR: {np.percentile(scores, 75) - np.percentile(scores, 25):.1f}
+                Std Dev: {np.std(scores):.2f}
+                """
+                ax2.text(0.02, 0.95, stats_text, transform=ax2.transAxes, 
+                        verticalalignment='top', fontsize=9,
+                        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+                
+                plt.tight_layout()
+                st.pyplot(fig2)
+            
+            # Performance Ranking Table
+            st.markdown("#### 🏆 Performance Ranking")
+            
+            # Create ranking dataframe
+            ranking_data = []
+            for idx, (name, score, orig_score) in enumerate(zip(student_names, scores, original_scores)):
+                if scale_type == "ielts":
+                    ranking_data.append({
+                        "Rank": idx + 1,
+                        "Student": name,
+                        "IELTS Band": f"{score:.1f}",
+                        "Equivalent 100-point": f"{orig_score:.1f}",
+                        "Performance": "Excellent" if score >= 7 else "Good" if score >= 5 else "Needs Improvement"
+                    })
+                else:
+                    performance = "Excellent" if score >= 80 else "Good" if score >= 60 else "Needs Improvement"
+                    ranking_data.append({
+                        "Rank": idx + 1,
+                        "Student": name,
+                        "Score": f"{score:.1f}",
+                        "Performance": performance
+                    })
+            
+            ranking_df = pd.DataFrame(ranking_data)
+            st.dataframe(ranking_df, use_container_width=True, hide_index=True)
+            
+            # Grammar Issues Analysis (if available)
+            grammar_issues_data = []
+            for r in st.session_state.results:
+                if r.get("details", {}).get("grammar", {}).get("available"):
+                    grammar_issues_data.append({
+                        "Student": r.get("name"),
+                        "Grammar Issues": r.get("details", {}).get("grammar", {}).get("issues_count", 0),
+                        "Score": r.get("final_score")
+                    })
+            
+            if grammar_issues_data:
+                st.markdown("#### 🔍 Grammar Issues Analysis")
+                grammar_df = pd.DataFrame(grammar_issues_data)
+                
+                # Create correlation analysis
+                fig3, (ax3a, ax3b) = plt.subplots(1, 2, figsize=(12, 4))
+                
+                # Scatter plot: Grammar issues vs Score
+                ax3a.scatter(grammar_df["Grammar Issues"], grammar_df["Score"], 
+                            alpha=0.6, s=100, edgecolors='black')
+                ax3a.set_xlabel('Number of Grammar Issues', fontsize=10)
+                ax3a.set_ylabel('Final Score', fontsize=10)
+                ax3a.set_title('Grammar Issues vs Performance', fontsize=12, fontweight='bold')
+                ax3a.grid(alpha=0.3)
+                
+                # Bar chart: Top grammar offenders
+                sorted_grammar = grammar_df.sort_values("Grammar Issues", ascending=False).head(10)
+                ax3b.barh(sorted_grammar["Student"], sorted_grammar["Grammar Issues"])
+                ax3b.set_xlabel('Number of Grammar Issues', fontsize=10)
+                ax3b.set_title('Top 10 Students with Most Grammar Issues', fontsize=12, fontweight='bold')
+                ax3b.grid(axis='x', alpha=0.3)
+                
+                plt.tight_layout()
+                st.pyplot(fig3)
             
             # Export results
-            st.markdown("#### Export Results")
-            if st.button("📤 Export Results as Excel"):
-                excel_bytes = export_results_to_excel(st.session_state.results)
+            st.markdown("---")
+            st.markdown("#### 📤 Export Results")
             
-                st.download_button(
-                    label="⬇️ Download Excel (.xlsx)",
-                    data=excel_bytes,
-                    file_name=f"grading_results_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+            col_exp1, col_exp2 = st.columns(2)
+            with col_exp1:
+                if st.button("📊 Export as Excel", use_container_width=True):
+                    excel_bytes = export_results_to_excel(st.session_state.results)
+                    st.download_button(
+                        label="⬇️ Download Excel (.xlsx)",
+                        data=excel_bytes,
+                        file_name=f"grading_results_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+            
+            with col_exp2:
+                if st.button("📈 Generate Report", use_container_width=True):
+                    # Create a comprehensive report
+                    report_data = {
+                        "summary": {
+                            "scale_used": scale_type,
+                            "total_students": len(scores),
+                            "average_score": round(np.mean(scores), 2),
+                            "date_generated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        },
+                        "detailed_scores": [
+                            {"student": name, "score": score, 
+                             "original_100_score": orig if scale_type == "ielts" else score}
+                            for name, score, orig in zip(student_names, scores, original_scores)
+                        ]
+                    }
+                    
+                    # Save as JSON
+                    report_json = json.dumps(report_data, indent=2)
+                    st.download_button(
+                        label="⬇️ Download JSON Report",
+                        data=report_json,
+                        file_name=f"grading_report_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+                        mime="application/json",
+                        use_container_width=True
+                    )
 
 
 # ==================== GRADING EXECUTION ====================
@@ -926,14 +1230,20 @@ if grade_button:
         
         try:
             if rubric_obj:
-                res = apply_rubric_json(rubric_obj, model_text, s_text)
+                res = apply_rubric_json(rubric_obj, model_text, s_text, output_scale)
             else:
-                res = heuristic_grade(model_text, s_text)
+                res = heuristic_grade(model_text, s_text, output_scale)
             
             # Enhanced feedback generation
             sim_pct = round(res.get("similarity", 0) * 100, 2)
             issues = res.get("grammar", {}).get("issues_count", "N/A")
-            reasoning = f"**Similarity to model answer:** {sim_pct}% | **Grammar issues:** {issues}"
+            
+            # Adjust reasoning based on scale
+            if output_scale == "ielts_band_0-9":
+                original_score = res.get("original_100_score", "N/A")
+                reasoning = f"**IELTS Band:** {res.get('final_score')}/9 | **Original Score:** {original_score}/100 | **Grammar issues:** {issues}"
+            else:
+                reasoning = f"**Similarity to model answer:** {sim_pct}% | **Grammar issues:** {issues}"
             
             # Contextual feedback lines
             feedback_lines = []
@@ -970,7 +1280,7 @@ if grade_button:
                 Exercise: {exercise_text}
                 Model Answer: {model_text}
                 Student Answer: {s_text}
-                Current Score: {res.get('final_score')}/100
+                Current Score: {res.get('final_score')}/{'9' if output_scale == 'ielts_band_0-9' else '100'}
                 
                 Provide 2-3 specific, actionable suggestions for improvement.
                 """
@@ -1018,19 +1328,41 @@ if st.session_state.get('results') and len(st.session_state.results) > 0:
                 st.markdown(f"### 👨‍🎓 {r.get('name', 'Student')}")
             with col2:
                 score = r.get('final_score', 0)
-                score_color = "green" if score >= 80 else "orange" if score >= 60 else "red"
-                st.markdown(f"<h2 style='color: {score_color}; text-align: center;'>{score}/100</h2>", unsafe_allow_html=True)
+                
+                # Adjust score display based on scale
+                if r.get("details", {}).get("scale_used") == "ielts":
+                    score_text = f"{score}/9"
+                    # IELTS band color coding
+                    score_color = "green" if score >= 7 else "orange" if score >= 5 else "red"
+                else:
+                    score_text = f"{score}/100"
+                    score_color = "green" if score >= 80 else "orange" if score >= 60 else "red"
+                
+                st.markdown(f"<h2 style='color: {score_color}; text-align: center;'>{score_text}</h2>", unsafe_allow_html=True)
             
-            # Progress bar visualization
-            st.markdown('<div class="progress-bar"><div class="progress-fill" style="width: {}%;"></div></div>'.format(score), unsafe_allow_html=True)
+            # Progress bar visualization (adjust max value based on scale)
+            if r.get("details", {}).get("scale_used") == "ielts":
+                progress_percent = (score / 9) * 100
+            else:
+                progress_percent = score
+            
+            st.markdown('<div class="progress-bar"><div class="progress-fill" style="width: {}%;"></div></div>'.format(progress_percent), unsafe_allow_html=True)
             
             # Score interpretation
-            if score >= 80:
-                st.markdown('<div class="success-box">🎉 Excellent work! Strong understanding demonstrated.</div>', unsafe_allow_html=True)
-            elif score >= 60:
-                st.markdown('<div class="warning-box">📚 Good effort, with room for improvement in key areas.</div>', unsafe_allow_html=True)
+            if r.get("details", {}).get("scale_used") == "ielts":
+                if score >= 7:
+                    st.markdown(f'<div class="success-box">🎉 Excellent IELTS performance! Band {score} indicates strong language proficiency.</div>', unsafe_allow_html=True)
+                elif score >= 5:
+                    st.markdown(f'<div class="warning-box">📚 Good IELTS band {score}. Shows competence with some room for improvement.</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="warning-box">💡 IELTS band {score} indicates limited proficiency. Focus on core language skills.</div>', unsafe_allow_html=True)
             else:
-                st.markdown('<div class="warning-box">💡 Needs significant improvement. Review fundamental concepts.</div>', unsafe_allow_html=True)
+                if score >= 80:
+                    st.markdown('<div class="success-box">🎉 Excellent work! Strong understanding demonstrated.</div>', unsafe_allow_html=True)
+                elif score >= 60:
+                    st.markdown('<div class="warning-box">📚 Good effort, with room for improvement in key areas.</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="warning-box">💡 Needs significant improvement. Review fundamental concepts.</div>', unsafe_allow_html=True)
             
             # Detailed feedback in expanders
             col1, col2 = st.columns(2)
