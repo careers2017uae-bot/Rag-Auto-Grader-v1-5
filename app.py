@@ -22,9 +22,13 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import requests
 from datetime import datetime
-import matplotlib.pyplot as plt
-
-# Optional imports
+try:
+    import matplotlib.pyplot as plt
+    HAS_MATPLOTLIB = True
+except ImportError:
+    plt = None
+    HAS_MATPLOTLIB = False
+    
 try:
     import docx2txt
 except Exception:
