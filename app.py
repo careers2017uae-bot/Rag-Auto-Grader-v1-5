@@ -1129,47 +1129,20 @@ with tab3:
                 st.pyplot(fig3)
             
             # Export results
+            # Export results
             st.markdown("---")
             st.markdown("#### 📤 Export Results")
             
-            col_exp1, col_exp2 = st.columns(2)
-            with col_exp1:
-                if st.button("📊 Export as Excel", use_container_width=True):
-                    excel_bytes = export_results_to_excel(st.session_state.results)
-                    st.download_button(
-                        label="⬇️ Download Excel (.xlsx)",
-                        data=excel_bytes,
-                        file_name=f"grading_results_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-            
-            with col_exp2:
-                if st.button("📈 Generate Report", use_container_width=True):
-                    # Create a comprehensive report
-                    report_data = {
-                        "summary": {
-                            "scale_used": scale_type,
-                            "total_students": len(scores),
-                            "average_score": round(np.mean(scores), 2),
-                            "date_generated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        },
-                        "detailed_scores": [
-                            {"student": name, "score": score, 
-                             "original_100_score": orig if scale_type == "ielts" and orig is not None else score}
-                            for name, score, orig in zip(student_names, scores, original_scores)
-                        ]
-                    }
-                    
-                    # Save as JSON
-                    report_json = json.dumps(report_data, indent=2)
-                    st.download_button(
-                        label="⬇️ Download JSON Report",
-                        data=report_json,
-                        file_name=f"grading_report_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-                        mime="application/json",
-                        use_container_width=True
-                    )
+            if st.button("📊 Export Results as Excel", use_container_width=True):
+                excel_bytes = export_results_to_excel(st.session_state.results)
+                
+                st.download_button(
+                    label="⬇️ Download Excel (.xlsx)",
+                    data=excel_bytes,
+                    file_name=f"grading_results_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
 
 
 # ==================== GRADING EXECUTION ====================
