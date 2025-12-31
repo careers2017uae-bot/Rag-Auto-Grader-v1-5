@@ -1072,11 +1072,13 @@ with tab3:
             ranking_data = []
             for idx, (name, score, orig_score) in enumerate(zip(student_names, scores, original_scores)):
                 if scale_type == "ielts":
+                    # Handle None values for orig_score
+                    orig_display = f"{orig_score:.1f}" if orig_score is not None else "N/A"
                     ranking_data.append({
                         "Rank": idx + 1,
                         "Student": name,
                         "IELTS Band": f"{score:.1f}",
-                        "Equivalent 100-point": f"{orig_score:.1f}",
+                        "Equivalent 100-point": orig_display,
                         "Performance": "Excellent" if score >= 7 else "Good" if score >= 5 else "Needs Improvement"
                     })
                 else:
@@ -1154,7 +1156,7 @@ with tab3:
                         },
                         "detailed_scores": [
                             {"student": name, "score": score, 
-                             "original_100_score": orig if scale_type == "ielts" else score}
+                             "original_100_score": orig if scale_type == "ielts" and orig is not None else score}
                             for name, score, orig in zip(student_names, scores, original_scores)
                         ]
                     }
