@@ -19,3 +19,4 @@ pandas
 openpyxl
 
 # No groq dependency needed - using Jina AI instead
+matplotlib==3.7.1 
